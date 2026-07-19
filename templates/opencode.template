@@ -1,0 +1,7 @@
+---
+output: $XDG_CONFIG_HOME/opencode/AGENTS.md
+---
+@prompts/shared
+@prompts/opencode
+@?local/shared.d
+@?local/opencode.d

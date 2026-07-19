@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+START_MARKER="# agent-prompts:begin"
+END_MARKER="# agent-prompts:end"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+usage() {
+    printf 'Usage: %s [bash|zsh|all]\n' "${0##*/}"
+}
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+    printf 'This installer currently supports Linux only.\n' >&2
+    exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+    printf 'git is required.\n' >&2
+    exit 1
+fi
+
+selected_shell="${1:-${SHELL##*/}}"
+case "${selected_shell}" in
+    bash) rc_files=("${HOME}/.bashrc") ;;
+    zsh) rc_files=("${HOME}/.zshrc") ;;
+    all) rc_files=("${HOME}/.bashrc" "${HOME}/.zshrc") ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+
+mkdir -p \
+    "${REPO_DIR}/local/shared.d" \
+    "${REPO_DIR}/local/codex.d" \
+    "${REPO_DIR}/local/opencode.d"
+
+printf -v quoted_repo '%q' "${REPO_DIR}"
+
+update_shell_config() {
+    local rc_file="$1"
+    local temporary
+    local line
+    local inside_block=false
+
+    temporary="$(mktemp "${rc_file}.tmp.XXXXXX")"
+
+    if [[ -f "${rc_file}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            if [[ "${line}" == "${START_MARKER}" ]]; then
+                inside_block=true
+                continue
+            fi
+            if [[ "${line}" == "${END_MARKER}" ]]; then
+                inside_block=false
+                continue
+            fi
+            if [[ "${inside_block}" != true ]]; then
+                printf '%s\n' "${line}" >> "${temporary}"
+            fi
+        done < "${rc_file}"
+    fi
+
+    if [[ -s "${temporary}" ]]; then
+        printf '\n' >> "${temporary}"
+    fi
+
+    {
+        printf '%s\n' "${START_MARKER}"
+        printf 'export AGENT_PROMPTS_HOME=%s\n' "${quoted_repo}"
+        printf '%s\n' 'alias prompts-render='\''"$AGENT_PROMPTS_HOME/scripts/render-prompts"'\'''
+        printf '%s\n' 'alias prompts-update='\''git -C "$AGENT_PROMPTS_HOME" pull --ff-only && "$AGENT_PROMPTS_HOME/scripts/render-prompts"'\'''
+        printf '%s\n' "${END_MARKER}"
+    } >> "${temporary}"
+
+    mv "${temporary}" "${rc_file}"
+    printf 'Updated: %s\n' "${rc_file}"
+}
+
+for rc_file in "${rc_files[@]}"; do
+    update_shell_config "${rc_file}"
+done
+
+AGENT_PROMPTS_HOME="${REPO_DIR}" "${SCRIPT_DIR}/render-prompts"
+
+printf 'Installation complete. Restart the shell or source the updated rc file.\n'

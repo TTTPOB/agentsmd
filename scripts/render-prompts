@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+PROMPTS_HOME="${AGENT_PROMPTS_HOME:-${REPO_DIR}}"
+TEMPLATES_DIR="${AGENT_PROMPTS_TEMPLATES_DIR:-${PROMPTS_HOME}/templates}"
+CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+MODE="render"
+
+usage() {
+    printf 'Usage: %s [--check]\n' "${0##*/}"
+}
+
+case "${1:-}" in
+    "") ;;
+    --check) MODE="check" ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+
+expand_path() {
+    local path="$1"
+
+    path="${path//\$XDG_CONFIG_HOME/${CONFIG_HOME}}"
+    path="${path//\$\{XDG_CONFIG_HOME\}/${CONFIG_HOME}}"
+    path="${path//\$HOME/${HOME}}"
+    path="${path//\$\{HOME\}/${HOME}}"
+
+    if [[ "${path}" == "~/"* ]]; then
+        path="${HOME}/${path:2}"
+    elif [[ "${path}" != /* ]]; then
+        path="${PROMPTS_HOME}/${path}"
+    fi
+
+    if [[ "${path}" == *'$'* ]]; then
+        printf 'Unsupported variable in path: %s\n' "$1" >&2
+        return 1
+    fi
+
+    printf '%s\n' "${path}"
+}
+
+template_output() {
+    local template="$1"
+    local line
+    local line_number=0
+    local output=""
+    local metadata_closed=false
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        ((line_number += 1))
+
+        if ((line_number == 1)); then
+            if [[ "${line}" != "---" ]]; then
+                printf 'Template must start with front matter: %s\n' "${template}" >&2
+                return 1
+            fi
+            continue
+        fi
+
+        if [[ "${line}" == "---" ]]; then
+            metadata_closed=true
+            break
+        fi
+
+        if [[ "${line}" == "output: "* ]]; then
+            if [[ -n "${output}" ]]; then
+                printf 'Template has multiple output fields: %s\n' "${template}" >&2
+                return 1
+            fi
+            output="${line#output: }"
+        fi
+    done < "${template}"
+
+    if [[ "${metadata_closed}" != true || -z "${output}" ]]; then
+        printf 'Template requires closed front matter and an output field: %s\n' "${template}" >&2
+        return 1
+    fi
+
+    expand_path "${output}"
+}
+
+append_include() {
+    local reference="$1"
+    local optional="$2"
+    local source
+    local file
+    local files=()
+
+    source="$(expand_path "${reference}")"
+
+    if [[ -f "${source}" ]]; then
+        cat "${source}"
+        printf '\n'
+        return 0
+    fi
+
+    if [[ -d "${source}" ]]; then
+        shopt -s nullglob
+        files=("${source}"/*.md)
+        shopt -u nullglob
+
+        if ((${#files[@]} == 0)); then
+            if [[ "${optional}" == true ]]; then
+                return 0
+            fi
+            printf 'Required directory has no Markdown fragments: %s\n' "${source}" >&2
+            return 1
+        fi
+
+        for file in "${files[@]}"; do
+            [[ -s "${file}" ]] || continue
+            cat "${file}"
+            printf '\n\n'
+        done
+        return 0
+    fi
+
+    if [[ "${optional}" == true ]]; then
+        return 0
+    fi
+
+    printf 'Required include does not exist: %s\n' "${source}" >&2
+    return 1
+}
+
+render_body() {
+    local template="$1"
+    local line
+    local line_number=0
+    local metadata_closed=false
+    local reference
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        ((line_number += 1))
+
+        if [[ "${metadata_closed}" != true ]]; then
+            if ((line_number > 1)) && [[ "${line}" == "---" ]]; then
+                metadata_closed=true
+            fi
+            continue
+        fi
+
+        if [[ "${line}" == '@?'* ]]; then
+            reference="${line:2}"
+            if [[ -z "${reference}" ]]; then
+                printf 'Empty optional include in template: %s\n' "${template}" >&2
+                return 1
+            fi
+            append_include "${reference}" true
+        elif [[ "${line}" == '@'* ]]; then
+            reference="${line:1}"
+            if [[ -z "${reference}" ]]; then
+                printf 'Empty required include in template: %s\n' "${template}" >&2
+                return 1
+            fi
+            append_include "${reference}" false
+        else
+            printf '%s\n' "${line}"
+        fi
+    done < "${template}"
+}
+
+render_template() {
+    local template="$1"
+    local output
+    local output_dir
+    local temporary
+
+    output="$(template_output "${template}")"
+    output_dir="$(dirname -- "${output}")"
+    if [[ "${MODE}" == "check" ]]; then
+        temporary="$(mktemp "${TMPDIR:-/tmp}/render-prompts.XXXXXX")"
+    else
+        mkdir -p "${output_dir}"
+        temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    fi
+
+    if ! {
+        printf '<!-- Generated from %s. Edit the template or prompt fragments instead. -->\n\n' "${template}"
+        render_body "${template}"
+    } > "${temporary}"; then
+        rm -f "${temporary}"
+        return 1
+    fi
+
+    if [[ "${MODE}" == "check" ]]; then
+        if [[ ! -f "${output}" ]] || ! cmp -s "${temporary}" "${output}"; then
+            printf 'Out of date: %s\n' "${output}" >&2
+            rm -f "${temporary}"
+            return 1
+        fi
+        rm -f "${temporary}"
+        printf 'Up to date: %s\n' "${output}"
+        return 0
+    fi
+
+    mv "${temporary}" "${output}"
+    printf 'Rendered: %s\n' "${output}"
+}
+
+shopt -s nullglob
+templates=("${TEMPLATES_DIR}"/*.template)
+shopt -u nullglob
+
+if ((${#templates[@]} == 0)); then
+    printf 'No templates found in %s\n' "${TEMPLATES_DIR}" >&2
+    exit 1
+fi
+
+for template in "${templates[@]}"; do
+    render_template "${template}"
+done

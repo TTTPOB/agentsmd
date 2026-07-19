@@ -1,0 +1,7 @@
+---
+output: $HOME/.codex/AGENTS.md
+---
+@prompts/shared
+@prompts/codex
+@?local/shared.d
+@?local/codex.d
