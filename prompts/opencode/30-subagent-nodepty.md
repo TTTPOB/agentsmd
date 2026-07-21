@@ -1,0 +1,1 @@
+main agent should always telling the subagent with it's identity to make sure the subagent knowing itself is a subagent. also as we are using opencode-pty now, if the subagent invoke this, it will result in a early return, since main agent will not get later updates invoked. so for subagents, don't use opencode-pty tools for running long tasks.
