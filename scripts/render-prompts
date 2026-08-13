@@ -6,6 +6,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 PROMPTS_HOME="${AGENT_PROMPTS_HOME:-${REPO_DIR}}"
 TEMPLATES_DIR="${AGENT_PROMPTS_TEMPLATES_DIR:-${PROMPTS_HOME}/templates}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+DSH_HOME="${DSH_HOME:-${HOME}/.dsh}"
 MODE="render"
 
 usage() {
@@ -30,6 +31,8 @@ expand_path() {
 
     path="${path//\$XDG_CONFIG_HOME/${CONFIG_HOME}}"
     path="${path//\$\{XDG_CONFIG_HOME\}/${CONFIG_HOME}}"
+    path="${path//\$DSH_HOME/${DSH_HOME}}"
+    path="${path//\$\{DSH_HOME\}/${DSH_HOME}}"
     path="${path//\$HOME/${HOME}}"
     path="${path//\$\{HOME\}/${HOME}}"
 

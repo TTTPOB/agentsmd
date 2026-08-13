@@ -38,7 +38,8 @@ esac
 mkdir -p \
     "${REPO_DIR}/local/shared.d" \
     "${REPO_DIR}/local/codex.d" \
-    "${REPO_DIR}/local/opencode.d"
+    "${REPO_DIR}/local/opencode.d" \
+    "${REPO_DIR}/local/dsh.d"
 
 printf -v quoted_repo '%q' "${REPO_DIR}"
 

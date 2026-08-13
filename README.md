@@ -27,11 +27,12 @@ Restart the shell or source the updated `~/.bashrc` or `~/.zshrc` after installa
 ## Layout
 
 ```text
-prompts/shared/*.md       Shared by Codex and OpenCode
+prompts/shared/*.md       Shared by Codex, OpenCode, and DSH
 prompts/codex/*.md        Codex-specific instructions
 prompts/opencode/*.md     OpenCode-specific instructions
+prompts/dsh/*.md          DSH-specific instructions
 templates/*.template      Composition and output definitions
-scripts/render-prompts    Builds both global instruction files
+scripts/render-prompts    Builds all global instruction files
 local/                    Ignored device-specific fragments
 ```
 
@@ -41,9 +42,10 @@ Device-specific fragments live under `$AGENT_PROMPTS_HOME/local`:
 
 ```text
 local/
-├── shared.d/             Loaded by Codex and OpenCode
+├── shared.d/             Loaded by Codex, OpenCode, and DSH
 ├── codex.d/              Loaded only by Codex
-└── opencode.d/           Loaded only by OpenCode
+├── opencode.d/           Loaded only by OpenCode
+└── dsh.d/                Loaded only by DSH
 ```
 
 The script uses its repository root when `AGENT_PROMPTS_HOME` is unset. Git ignores the complete `local/` directory.
@@ -70,7 +72,7 @@ Template directives have the following behavior:
 - `@?path` marks a file or directory as optional.
 - Other lines are copied to the output as literal text.
 
-Relative include and output paths resolve from `AGENT_PROMPTS_HOME`. Output paths support `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, and `~/`. When `XDG_CONFIG_HOME` is unset, the renderer uses `$HOME/.config`. It rejects other variables instead of evaluating shell expressions.
+Relative include and output paths resolve from `AGENT_PROMPTS_HOME`. Output paths support `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, `$DSH_HOME`, `${DSH_HOME}`, and `~/`. When `XDG_CONFIG_HOME` is unset, the renderer uses `$HOME/.config`; when `DSH_HOME` is unset, it uses `$HOME/.dsh`. It rejects other variables instead of evaluating shell expressions.
 
 Add another `templates/*.template` file to create another output. The renderer discovers it without script changes.
 
@@ -85,7 +87,10 @@ The included templates write:
 ```text
 ~/.codex/AGENTS.md
 ~/.config/opencode/AGENTS.md
+~/.dsh/AGENTS.md
 ```
+
+DSH reads `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`) as its fixed user-global instructions file in every session; per-project `AGENTS.md` and `CLAUDE.md` files load automatically from the session directory upward, so keep only standing orders in the rendered file.
 
 Check whether existing outputs match the fragments without changing them:
 
@@ -93,7 +98,7 @@ Check whether existing outputs match the fragments without changing them:
 ./scripts/render-prompts --check
 ```
 
-Restart OpenCode after rendering because a running session keeps the instructions it loaded at startup.
+Restart OpenCode or start a new DSH session after rendering because a running session keeps the instructions it loaded at startup.
 
 ## Bash aliases
 

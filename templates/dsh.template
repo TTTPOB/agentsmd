@@ -1,0 +1,7 @@
+---
+output: $DSH_HOME/AGENTS.md
+---
+@prompts/shared
+@prompts/dsh
+@?local/shared.d
+@?local/dsh.d
