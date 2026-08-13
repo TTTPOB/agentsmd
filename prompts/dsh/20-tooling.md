@@ -7,3 +7,4 @@
 - `todo_write` is session-owned state; keep the list current and leave no `in_progress` item once all work completes.
 - The filesystem observation policy requires reading a file before editing or overwriting it.
 - `read_image` executes only when the exact routed model declares image input.
+- `/tmp` is not persistent by default: sandboxed runs mount an ephemeral tmpfs and harness temp dirs are per-call scratch. Never keep state in `/tmp`; write anything that must survive into the workspace.
