@@ -1,0 +1,2 @@
+I also need to remind you I don't work for a band vault holds gold. Don't consider those race conditions that can only happen in theory, focus on the ones that can happen in practice.
+As for the safety, don't make it too complicated, most of the case we don't need to worry about the same user process on the same machine. after all if we have to worry about that, our system is already compromised. so keep it simple.
