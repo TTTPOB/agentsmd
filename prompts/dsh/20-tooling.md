@@ -12,29 +12,70 @@ For subagents:
 If you are about to finish your current turn and settle, do NOT call `send_message` merely to report the same result to your parent. Put the result in your final assistant response instead; settlement will automatically notify the parent with that final message. Use `send_message` only when information genuinely needs to reach the parent before you settle.
 Starting a background task and stop current turn will result in `subagent-settlement`, and send a report to parent agent, which may cause incomplete report. so before your final report is done, don't end your turn that way. Also in normal cases you don't need to use a subagent anyway.
 
-## Tool-call batching and round trips
+## Tool-call batching and run_code output
 
 Minimize model/tool round trips.
 
-When multiple tool operations are already known and do not require inspecting
-the result of an earlier operation to determine the arguments of a later one,
-batch them into the same assistant step, if you have `run_code` tool available,
-you can use run_code to wrap them.
-if not, you can just issue multiple tool calls in one assistant message.
+Batch operations whose arguments are already known and independent. Only introduce a new round trip when a later operation actually depends on an earlier result.
 
-Mutating tools may be serialized by the harness. This is an execution-scheduling
-detail and is NOT a reason to split independent mutations across multiple
-plain tool call or `run_code` calls. Submit the known operations together and let the harness
-schedule them.
+If the results do not need substantial filtering, aggregation, or transformation, prefer issuing multiple plain tool calls in the same assistant message. Do not wrap them in run_code merely for batching.
 
-in `run_code` Use `Promise.all` for independent operations when convenient. The harness will
-parallelize concurrency-safe calls and serialize exclusive calls as required.
+Example — issue these together when all three are already known:
+```
+read({ file_path: "fileA.py" })
+grep({ pattern: "foo", path: "src" })
+glob({ pattern: "tests/**/*.py" })
+```
 
-ONLY introduce a new model round trip when a later operation actually depends
-on information returned by an earlier operation.
+Use run_code when intermediate results benefit from programmatic processing. Independent calls inside run_code should normally use Promise.all.
+```
+const [doc, refs] = await Promise.all([
+  tools.read({ file_path: "docs/service.md", limit: 300 }),
+  tools.grep({ pattern: "service_name", path: "ansible" }),
+]);
 
-For edits to the same file, preserve logical dependency order when a later
-edit depends on text produced by an earlier edit.
+return {
+  doc: doc.lines.map(x => `${x.number}: ${x.text}`).join("\n"),
+  refs: refs.matches.slice(0, 100),
+};
+```
+
+Avoid for (...) { await tools.*(...) } when all calls are independent and known in advance.
+
+return and console.log(...) are the boundary into model context. Intermediate tool results stay inside run_code, so project, filter, or aggregate them before returning. Return the minimum sufficient representation, not whole canonical tool-result objects.
+```
+const r = await tools.bash({
+  command: "pwd",
+  description: "Show current directory",
+});
+
+return r.stdout.text.trim();
+```
+Multiple already-known edits may also be submitted in the same assistant step — even edits to the same file, rather than using a separate model round trip for each edit.
+
+Example — if all three edits to fileA.py are already known:
+
+```
+edit({
+  file_path: "fileA.py",
+  old_string: "old_a",
+  new_string: "new_a",
+})
+
+edit({
+  file_path: "fileA.py",
+  old_string: "old_b",
+  new_string: "new_b",
+})
+
+edit({
+  file_path: "fileA.py",
+  old_string: "old_c",
+  new_string: "new_c",
+})
+```
+
+Preserve logical order when a later edit depends on text or state produced by an earlier edit. Preserve paths, line numbers, status, errors, or other metadata when later reasoning actually needs them.
 
 ## Background jobs
 
