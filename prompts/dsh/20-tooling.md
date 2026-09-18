@@ -12,3 +12,26 @@
 For subagents:
 If you are about to finish your current turn and settle, do NOT call `send_message` merely to report the same result to your parent. Put the result in your final assistant response instead; settlement will automatically notify the parent with that final message. Use `send_message` only when information genuinely needs to reach the parent before you settle.
 
+## Tool-call batching and round trips
+
+Minimize model/tool round trips.
+
+When multiple tool operations are already known and do not require inspecting
+the result of an earlier operation to determine the arguments of a later one,
+batch them into the same assistant step, if you have `run_code` tool available,
+you can use run_code to wrap them.
+if not, you can just issue multiple tool calls in one assistant message.
+
+Mutating tools may be serialized by the harness. This is an execution-scheduling
+detail and is NOT a reason to split independent mutations across multiple
+plain tool call or `run_code` calls. Submit the known operations together and let the harness
+schedule them.
+
+in `run_code` Use `Promise.all` for independent operations when convenient. The harness will
+parallelize concurrency-safe calls and serialize exclusive calls as required.
+
+ONLY introduce a new model round trip when a later operation actually depends
+on information returned by an earlier operation.
+
+For edits to the same file, preserve logical dependency order when a later
+edit depends on text produced by an earlier edit.
