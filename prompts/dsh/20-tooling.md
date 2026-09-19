@@ -15,37 +15,83 @@ Starting a background task and stop current turn will result in `subagent-settle
 
 ## Tool-call batching and run_code output
 
-**Minimize model/tool round trips, not merely execution time.**
+**Minimize model/tool round trips AND unnecessary context usage.**
 
-Batch all currently known operations that do not require another model decision. Do not issue one tool-call turn per edit, write, or read when several operations are already determined.
+Before invoking tools, identify all operations that can proceed without another model decision. Batch them into the same assistant tool-call turn instead of repeatedly calling one tool, observing routine success, and calling the next.
 
-Batching and execution concurrency are different: operations may execute sequentially within one tool call without introducing additional model round trips. Do not split a batch merely because some operations are exclusive or ordered.
+A new model round trip is justified when an intermediate result requires new model reasoning, NOT merely because one operation has completed. Resolve deterministic dependencies programmatically whenever practical.
 
-- With native tools, emit independent operations as sibling tool calls in the same assistant message.
-- With `run_code`, group known operations into one program. Use `Promise.all` when appropriate, or sequential `await` for ordered/dependent operations.
-- Introduce another model round trip only when the model must inspect an intermediate result to decide what to do next. Resolve deterministic dependencies programmatically whenever practical.
+### Interpret the SDK concurrency instruction correctly
+
+Read the built-in instruction:
+
+> "Independent read-only calls MAY overlap under `Promise.all` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with `await`."
+
+as an **execution-scheduling constraint, NOT a model/tool round-trip constraint**. The Python `asyncio.gather` variant has the same meaning.
+
+Specifically:
+
+- "Mutating calls run alone" means the harness may serialize their execution. It does NOT mean each edit or write needs a separate assistant turn or `run_code`.
+- "Sequence dependent work with await" means preserving execution order INSIDE the same `run_code` whenever subsequent operations are already determined.
+- `Promise.all` / `asyncio.gather` is an execution pattern, NOT a prerequisite for batching. Sequential `await` inside one `run_code` also saves model round trips.
+
+**Serialization is not a reason to split a batch.**
+
+### Choose the appropriate batching form
+
+Batching does NOT imply using `run_code`.
+
+- When native tools are available and results need no substantial filtering, aggregation, or transformation, prefer multiple sibling tool calls in one assistant message. Do not wrap ordinary calls in `run_code` merely for batching or return their results unchanged through it.
+- Use `run_code` when programmatic processing, loops, deterministic transformations, or ordered operations benefit from being handled together.
+- In PTC-only mode, use one `run_code` for multiple known operations rather than one invocation per operation.
+- Inside `run_code`, use `Promise.all` when appropriate, or sequential `await` for ordered/dependent operations. Both achieve batching.
+- Do not return control to the model between already-determined operations merely to observe individual success. Handle expected intermediate results programmatically; return when new model reasoning is needed.
+
+If an operation fails or reveals an unexpected condition, stop or handle it programmatically as appropriate. Do not blindly continue an invalid batch.
 
 ### Examples
 
-**1. Independent edits across files — one assistant turn**
+**1. Simple independent operations — sibling native calls**
 
-Instead of:
+WRONG:
+
+```text
+read(A) → model → grep(B) → model → glob(C)
+```
+
+RIGHT:
+
+```text
+One assistant turn:
+  read(A)
+  grep(B)
+  glob(C)
+```
+
+Avoid wrapping these calls in `run_code` merely to return their results unchanged.
+
+**2. Independent edits across files — one assistant turn**
+
+WRONG:
 
 ```text
 edit(fileA) → model → edit(fileB) → model → edit(fileC)
 ```
 
-Submit together:
+RIGHT:
 
 ```text
-edit(fileA)
-edit(fileB)
-edit(fileC)
+One assistant turn:
+  edit(fileA)
+  edit(fileB)
+  edit(fileC)
 ```
 
-The harness handles execution scheduling; batching does not require actual concurrent writes.
+The harness handles execution scheduling. Actual concurrent writes are not required to achieve batching.
 
-**2. Multiple known edits to the same file — one run_code**
+**3. Multiple known edits to the same file — one run_code**
+
+After observing the file, execute the known edits in order:
 
 ```ts
 for (const [old_string, new_string] of [
@@ -61,11 +107,31 @@ for (const [old_string, new_string] of [
 }
 ```
 
-The edits execute in order, but require only one model/tool round trip. Do not use true concurrency when edits can conflict or invalidate each other's file versions.
+One `run_code`, three ordered edits, one model/tool round trip.
 
-**3. Programmatic transformations — avoid copying file contents through the model**
+Do not split these into three `run_code` calls. Do not use true concurrency when edits may conflict or invalidate each other's file versions.
 
-For splitting a large file into several smaller files, prefer:
+**4. Process intermediate results inside run_code**
+
+When results benefit from filtering, aggregation, or transformation:
+
+```ts
+const [doc, refs] = await Promise.all([
+  tools.read({ file_path: "docs/service.md", limit: 300 }),
+  tools.grep({ pattern: "service_name", path: "ansible" }),
+]);
+
+return {
+  doc: doc.lines.map(x => `${x.number}: ${x.text}`).join("\n"),
+  refs: refs.matches.slice(0, 100),
+};
+```
+
+This is a useful `run_code` invocation because the program processes the results rather than merely forwarding them unchanged.
+
+**5. Deterministic file transformations — keep data inside run_code**
+
+For splitting a large file at known boundaries:
 
 ```ts
 const source = await tools.read({ file_path: "large.ts" });
@@ -76,13 +142,32 @@ for (const [path, content] of Object.entries(parts)) {
 }
 ```
 
-When boundaries and transformations are deterministic, process the content inside `run_code` rather than reading it into model context and reproducing it through separate writes.
+Here `splitSource` represents deterministic splitting logic implemented in the same program.
 
-### Output discipline
+Avoid returning the entire source to model context merely to reproduce its contents through separate writes.
 
-Return only information needed for the next model decision: concise summaries, errors, relevant excerpts, or paths. Avoid returning large intermediate content that has already been processed programmatically.
+### run_code output discipline
 
-**Decision rule:** If the next operation can already be determined without another model inference, keep it in the current tool-call turn.
+`return` and `console.log(...)` are the boundary into model context. Intermediate tool results stay inside `run_code` until explicitly returned or logged.
+
+Project, filter, or aggregate results before returning them. Return the minimum sufficient representation.
+
+Example:
+
+```ts
+const r = await tools.bash({
+  command: "pwd",
+  description: "Show current directory",
+});
+
+return r.stdout.text.trim();
+```
+
+In this case, avoid `return r` since it will return the whole object which bloats the model context.
+
+Preserve errors, status, paths, line numbers, or other metadata when they matter for subsequent reasoning. Do not discard useful information merely to minimize output size.
+
+**Decision rule: If the next operation can be determined without another model inference, keep it in the current tool-call turn. Prefer native batching when results can be consumed as-is; use `run_code` when code adds value.**
 
 ## Background jobs
 
