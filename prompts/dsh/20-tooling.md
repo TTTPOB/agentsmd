@@ -12,70 +12,77 @@ For subagents:
 If you are about to finish your current turn and settle, do NOT call `send_message` merely to report the same result to your parent. Put the result in your final assistant response instead; settlement will automatically notify the parent with that final message. Use `send_message` only when information genuinely needs to reach the parent before you settle.
 Starting a background task and stop current turn will result in `subagent-settlement`, and send a report to parent agent, which may cause incomplete report. so before your final report is done, don't end your turn that way. Also in normal cases you don't need to use a subagent anyway.
 
+
 ## Tool-call batching and run_code output
 
-Minimize model/tool round trips.
+**Minimize model/tool round trips, not merely execution time.**
 
-Batch operations whose arguments are already known and independent. Only introduce a new round trip when a later operation actually depends on an earlier result.
+Batch all currently known operations that do not require another model decision. Do not issue one tool-call turn per edit, write, or read when several operations are already determined.
 
-If the results do not need substantial filtering, aggregation, or transformation, prefer issuing multiple plain tool calls in the same assistant message. Do not wrap them in run_code merely for batching.
+Batching and execution concurrency are different: operations may execute sequentially within one tool call without introducing additional model round trips. Do not split a batch merely because some operations are exclusive or ordered.
 
-Example — issue these together when all three are already known:
-```
-read({ file_path: "fileA.py" })
-grep({ pattern: "foo", path: "src" })
-glob({ pattern: "tests/**/*.py" })
-```
+- With native tools, emit independent operations as sibling tool calls in the same assistant message.
+- With `run_code`, group known operations into one program. Use `Promise.all` when appropriate, or sequential `await` for ordered/dependent operations.
+- Introduce another model round trip only when the model must inspect an intermediate result to decide what to do next. Resolve deterministic dependencies programmatically whenever practical.
 
-Use run_code when intermediate results benefit from programmatic processing. Independent calls inside run_code should normally use Promise.all.
-```
-const [doc, refs] = await Promise.all([
-  tools.read({ file_path: "docs/service.md", limit: 300 }),
-  tools.grep({ pattern: "service_name", path: "ansible" }),
-]);
+### Examples
 
-return {
-  doc: doc.lines.map(x => `${x.number}: ${x.text}`).join("\n"),
-  refs: refs.matches.slice(0, 100),
-};
+**1. Independent edits across files — one assistant turn**
+
+Instead of:
+
+```text
+edit(fileA) → model → edit(fileB) → model → edit(fileC)
 ```
 
-Avoid for (...) { await tools.*(...) } when all calls are independent and known in advance.
+Submit together:
 
-return and console.log(...) are the boundary into model context. Intermediate tool results stay inside run_code, so project, filter, or aggregate them before returning. Return the minimum sufficient representation, not whole canonical tool-result objects.
-```
-const r = await tools.bash({
-  command: "pwd",
-  description: "Show current directory",
-});
-
-return r.stdout.text.trim();
-```
-Multiple already-known edits may also be submitted in the same assistant step — even edits to the same file, rather than using a separate model round trip for each edit.
-
-Example — if all three edits to fileA.py are already known:
-
-```
-edit({
-  file_path: "fileA.py",
-  old_string: "old_a",
-  new_string: "new_a",
-})
-
-edit({
-  file_path: "fileA.py",
-  old_string: "old_b",
-  new_string: "new_b",
-})
-
-edit({
-  file_path: "fileA.py",
-  old_string: "old_c",
-  new_string: "new_c",
-})
+```text
+edit(fileA)
+edit(fileB)
+edit(fileC)
 ```
 
-Preserve logical order when a later edit depends on text or state produced by an earlier edit. Preserve paths, line numbers, status, errors, or other metadata when later reasoning actually needs them.
+The harness handles execution scheduling; batching does not require actual concurrent writes.
+
+**2. Multiple known edits to the same file — one run_code**
+
+```ts
+for (const [old_string, new_string] of [
+  ["old_a", "new_a"],
+  ["old_b", "new_b"],
+  ["old_c", "new_c"],
+]) {
+  await tools.edit({
+    file_path: "fileA.py",
+    old_string,
+    new_string,
+  });
+}
+```
+
+The edits execute in order, but require only one model/tool round trip. Do not use true concurrency when edits can conflict or invalidate each other's file versions.
+
+**3. Programmatic transformations — avoid copying file contents through the model**
+
+For splitting a large file into several smaller files, prefer:
+
+```ts
+const source = await tools.read({ file_path: "large.ts" });
+const parts = someFuncToSplitSourceYouWrote(source.content);
+
+for (const [path, content] of Object.entries(parts)) {
+  await tools.write({ file_path: path, content });
+}
+```
+
+When boundaries and transformations are deterministic, process the content inside `run_code` rather than reading it into model context and reproducing it through separate writes.
+
+### Output discipline
+
+Return only information needed for the next model decision: concise summaries, errors, relevant excerpts, or paths. Avoid returning large intermediate content that has already been processed programmatically.
+
+**Decision rule:** If the next operation can already be determined without another model inference, keep it in the current tool-call turn.
 
 ## Background jobs
 
