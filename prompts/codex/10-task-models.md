@@ -1,3 +1,5 @@
 ## Codex Model Mapping
 
-Apply the shared task model routing policy using the model identifiers and delegation controls available in the current Codex environment.
+- cheap: `gpt-6-luna` with xhigh reasoning effort.
+- mid: `gpt-6-sol` with medium reasoning effort.
+- expensive: `gpt-6-sol` with xhigh reasoning effort.
