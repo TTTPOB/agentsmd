@@ -183,3 +183,29 @@ For the built-in jobs instruction:
 Interpret “Before giving a final answer” as “before giving a task-completing final answer”; a temporary yield while waiting for a background-job callback is not a task-completing final answer.
 Interpret “set `wait: true` only when you are genuinely blocked on it” as permission, not a requirement to block. Prefer yielding for the completion callback when a previously justified background job is now the only thing left to wait for. Use `wait: true` only when the result must specifically be obtained synchronously in the current turn or callback delivery is unavailable.
 The same applies to subagents: after starting a subagent, continue useful independent work; if that work is exhausted and the subagent is still running, yield and wait for the settlement callback.
+
+## Skill loading: load versus reuse
+
+Interpret:
+
+> “If the user names a skill, or the task clearly matches a skill's description,
+> call the `skill` tool … before taking task actions.”
+
+as requiring its full instructions to be available before acting, NOT a fresh
+tool call for every request.
+
+- Reuse full instructions already in the current context, whether loaded by
+  the agent or invoked by the user. This also applies to workflow files.
+- A new message, task phase, workflow switch, or catalog update alone does
+  not invalidate loaded instructions.
+- Reload only when needed instructions are missing from context, are known
+  to have changed, or the user explicitly requests a refresh.
+- A catalog summary is not the full instructions.
+
+Examples (hypothetical skill names):
+- `document-editing` and its editing guide are loaded; user requests another
+  edit → reuse both, without loading again.
+- `data-analysis` is loaded; user requests plotting, whose guide is not loaded
+  → read only the plotting guide.
+- An unrelated skill is added to the catalog; user continues the same task
+  → reuse the applicable instructions already loaded.
