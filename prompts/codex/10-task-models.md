@@ -1,5 +1,3 @@
 ## Codex Model Mapping
 
-- cheap: `gpt-6-luna` with xhigh reasoning effort.
-- mid: `gpt-6-sol` with medium reasoning effort.
-- expensive: `gpt-6-sol` with xhigh reasoning effort.
+currently gpt-6.1-sol is the best model, use low for cheap task, medium for mid task, and high for more complex task
