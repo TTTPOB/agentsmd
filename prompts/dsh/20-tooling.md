@@ -9,8 +9,11 @@
 - `/tmp` is not persistent by default: sandboxed runs mount an ephemeral tmpfs and harness temp dirs are per-call scratch. Never keep state in `/tmp`; write anything that must survive into the workspace.
 
 For subagents:
-If you are about to finish your current turn and settle, do NOT call `send_message` merely to report the same result to your parent. Put the result in your final assistant response instead; settlement will automatically notify the parent with that final message. Use `send_message` only when information genuinely needs to reach the parent before you settle.
-Starting a background task and stop current turn will result in `subagent-settlement`, and send a report to parent agent, which may cause incomplete report. so before your final report is done, don't end your turn that way. Also in normal cases you don't need to use a subagent anyway.
+Before ending your current turn and settling, send your complete report to your parent via `send_message`. Do not rely on the settlement response to deliver the report: incoming messages from other agents may cause you to immediately start another turn.
+
+Treat that `send_message` as the last substantive output of the current turn. After sending it, end the turn without repeating or expanding the report in your final assistant response. If a final response is required, use only a brief acknowledgment such as "Done"; otherwise, end without additional text.
+
+Do not settle before your report is ready and sent. Starting background work and ending the turn may trigger a settlement notification even though the work is still incomplete. In normal cases, you do not need to use a subagent.
 
 
 ## Tool-call batching and run_code output
