@@ -92,6 +92,8 @@ The included templates write:
 
 DSH reads `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`) as its fixed user-global instructions file in every session; per-project `AGENTS.md` and `CLAUDE.md` files load automatically from the session directory upward, so keep only standing orders in the rendered file.
 
+DSH native/PTC batching, program-output, background-work, and child-reporting guidance belongs to the `runtime-tooling-guidance.mjs` local plugin in dsh-config, selected from actual runtime capabilities. This repository retains delegation ownership and skill-reuse preferences, not tool defaults or SDK instructions. Deploy that plugin before rendering the shortened DSH instructions; updating this repository alone does not install it.
+
 Check whether existing outputs match the fragments without changing them:
 
 ```bash
